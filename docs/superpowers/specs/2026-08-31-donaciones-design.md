@@ -1,8 +1,8 @@
-# Design: fundraising goals platform for animal protection NGOs
+# Design: CuantoFalta — fundraising goals platform for animal protection NGOs
 
 **Date:** 2026-08-31
-**Status:** Draft for review
-**Working name:** Donaciones (candidate public name: *Cuánto Falta*)
+**Status:** Approved
+**Name:** CuantoFalta (displayed as *Cuánto Falta*)
 
 ## Context
 
@@ -219,4 +219,5 @@ way.
 2. **Can production OAuth credentials be activated without an Empresa account?** MP's credentials
    documentation lists only industry, website URL and T&C. Third-party guides claim a business
    account is needed; unverified either way.
-3. **Confirm the `.com.ar` domain and social handles** for any public name before committing to it.
+3. **Confirm `cuantofalta.com.ar` / `cuantofalta.ar` and social handles are free.** The name is
+   settled for the codebase; only the public domain registration remains to be checked.
