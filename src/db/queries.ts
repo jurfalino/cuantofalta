@@ -79,3 +79,17 @@ export async function getNgoSecrets(d: Db, ngoId: string) {
 export async function markNgoDisconnected(d: Db, ngoId: string): Promise<void> {
   await d.update(s.ngo).set({ status: 'disconnected' }).where(eq(s.ngo.id, ngoId))
 }
+
+export async function upsertPlatformContribution(d: Db, c: {
+  id: string; goalId: string; mpPaymentId: string
+  amountCents: number; status: string; paidAt: string
+}): Promise<void> {
+  await d.insert(s.contribution).values({
+    id: c.id, goalId: c.goalId, source: 'platform', mpPaymentId: c.mpPaymentId,
+    amountCents: c.amountCents, status: c.status, paidAt: c.paidAt,
+    note: null, createdAt: new Date().toISOString(),
+  }).onConflictDoUpdate({
+    target: s.contribution.mpPaymentId,
+    set: { status: c.status, amountCents: c.amountCents, paidAt: c.paidAt },
+  })
+}
