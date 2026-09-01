@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatArs, barWidthPercent, GoalPage } from './views'
+import { formatArs, formatArsBreakdown, barWidthPercent, GoalPage } from './views'
 import type { Goal } from '../goals/types'
 import type { GoalProgress } from '../goals/progress'
 
@@ -9,6 +9,32 @@ describe('formatArs', () => {
   })
   it('formats zero', () => {
     expect(formatArs(0)).toBe('$0')
+  })
+})
+
+describe('formatArsBreakdown', () => {
+  it('makes verified 50c + manual 50c sum to the same $1 shown as the headline, rather than $1 + $1', () => {
+    const { total, parts } = formatArsBreakdown(100, [50, 50])
+    expect(total).toBe('$1')
+    expect(parts).toEqual(['$1', '$0'])
+  })
+
+  it('leaves already-consistent whole-peso figures untouched', () => {
+    const { total, parts } = formatArsBreakdown(150_000, [100_000, 50_000])
+    expect(total).toBe('$1.500')
+    expect(parts).toEqual(['$1.000', '$500'])
+  })
+
+  it('handles a single part (no other parts to fold slack into)', () => {
+    const { total, parts } = formatArsBreakdown(50, [50])
+    expect(total).toBe('$1')
+    expect(parts).toEqual(['$1'])
+  })
+
+  it('handles zero total and zero parts', () => {
+    const { total, parts } = formatArsBreakdown(0, [0, 0])
+    expect(total).toBe('$0')
+    expect(parts).toEqual(['$0', '$0'])
   })
 })
 
