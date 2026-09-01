@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { html } from 'hono/html'
 import { db, getGoalById, listContributions } from '../db/queries'
 import { computeProgress } from '../goals/progress'
 import { GoalPage } from './views'
@@ -11,5 +12,5 @@ publicRoutes.get('/g/:id', async (c) => {
   const goal = await getGoalById(d, c.req.param('id'))
   if (!goal) return c.notFound()
   const progress = computeProgress(goal, await listContributions(d, goal.id))
-  return c.html(<GoalPage goal={goal} progress={progress} />)
+  return c.html(html`<!DOCTYPE html>${<GoalPage goal={goal} progress={progress} />}`)
 })

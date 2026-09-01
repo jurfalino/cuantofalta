@@ -12,7 +12,7 @@ export function barWidthPercent(percent: number): number {
 
 export function ProgressBar({ progress }: { progress: GoalProgress }) {
   return (
-    <div class="bar" role="progressbar" aria-valuenow={progress.percent} aria-valuemin={0} aria-valuemax={100}>
+    <div class="bar" role="progressbar" aria-valuenow={barWidthPercent(progress.percent)} aria-valuemin={0} aria-valuemax={100}>
       <div class="bar-fill" style={`width:${barWidthPercent(progress.percent)}%`} />
     </div>
   )
