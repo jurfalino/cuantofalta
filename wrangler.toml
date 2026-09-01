@@ -5,7 +5,7 @@ compatibility_date = "2026-08-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "cuantofalta"
-database_id = "local"
+database_id = "90ce7f04-3dce-45f7-a4b5-0af1a840edbc"
 
 [triggers]
 crons = ["*/2 * * * *"]
