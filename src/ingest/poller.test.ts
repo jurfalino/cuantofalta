@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { attributePayments, withTokenRefresh, ingestForNgo, TokenRefreshFailedError } from './poller'
+import { attributePayments, withTokenRefresh, ingestForNgo, ingestOneNgo, TokenRefreshFailedError } from './poller'
 import { FakeMercadoPago } from '../mp/fake'
 import type { MpPayment } from '../mp/client'
 
@@ -149,5 +149,97 @@ describe('ingestForNgo', () => {
     expect(refreshes).toBe(1)
     expect(result).toEqual({ upserted: 1, ignored: 0 })
     expect(upserted).toEqual([expect.objectContaining({ mpPaymentId: 'p1', goalId: 'g1' })])
+  })
+})
+
+describe('ingestOneNgo', () => {
+  const baseDeps = (over: Partial<Parameters<typeof ingestOneNgo>[0]> = {}) => ({
+    ngoId: 'ngo-1',
+    client: new FakeMercadoPago(),
+    since: new Date('2026-08-31T00:00:00Z'),
+    now: new Date('2026-08-31T23:59:59Z'),
+    loadSecrets: async () => ({ accessTokenEnc: 'enc-access', refreshTokenEnc: 'enc-refresh' }),
+    loadGoalIds: async () => ['g1'],
+    decrypt: async () => 'plain-token',
+    refresh: async () => 'fresh-token',
+    upsert: async () => {},
+    markDisconnected: async () => {},
+    log: () => {},
+    ...over,
+  })
+
+  it('never throws when loadSecrets fails (e.g. a corrupted row or a rotated TOKEN_KEY), so a caller looping over NGOs can move on', async () => {
+    const logs: string[] = []
+    let disconnected = false
+    await expect(ingestOneNgo(baseDeps({
+      loadSecrets: async () => { throw new Error('D1_ERROR: no such table') },
+      markDisconnected: async () => { disconnected = true },
+      log: (m) => logs.push(m),
+    }))).resolves.toBeUndefined()
+    expect(disconnected).toBe(false) // a DB blip is not a reconnect-required condition
+    expect(logs).toHaveLength(1)
+  })
+
+  it('never throws when decrypt fails (bad AES-GCM tag / rotated key), and does not mark the NGO disconnected', async () => {
+    const logs: string[] = []
+    let disconnected = false
+    await expect(ingestOneNgo(baseDeps({
+      decrypt: async () => { throw new Error('OperationError') },
+      markDisconnected: async () => { disconnected = true },
+      log: (m) => logs.push(m),
+    }))).resolves.toBeUndefined()
+    expect(disconnected).toBe(false)
+    expect(logs).toHaveLength(1)
+  })
+
+  it('marks the NGO disconnected when the refresh itself fails after a 401', async () => {
+    const fake = new FakeMercadoPago()
+    fake.failNextWith401 = true
+    let disconnected = false
+    await ingestOneNgo(baseDeps({
+      client: fake,
+      refresh: async () => { throw new Error('MP OAuth error: invalid_grant') },
+      markDisconnected: async () => { disconnected = true },
+    }))
+    expect(disconnected).toBe(true)
+  })
+
+  it('skips silently (no error, no disconnect) when the NGO has no stored tokens', async () => {
+    let disconnected = false
+    let upserts = 0
+    await ingestOneNgo(baseDeps({
+      loadSecrets: async () => ({ accessTokenEnc: null, refreshTokenEnc: null }),
+      markDisconnected: async () => { disconnected = true },
+      upsert: async () => { upserts++ },
+    }))
+    expect(disconnected).toBe(false)
+    expect(upserts).toBe(0)
+  })
+
+  it('one NGO throwing at every stage does not prevent the next NGO in a loop from ingesting successfully', async () => {
+    const fake = new FakeMercadoPago()
+    fake.seedPayment({
+      id: 'p1', status: 'approved', transactionAmountCents: 60_000,
+      externalReference: 'g1', dateApproved: '2026-08-31T10:00:00Z',
+    })
+
+    const upsertedByNgo: Record<string, unknown[]> = { a: [], b: [] }
+    const order = ['a', 'b']
+
+    for (const ngoId of order) {
+      await ingestOneNgo(baseDeps({
+        ngoId,
+        client: fake,
+        // NGO 'a' fails as early as possible in the per-NGO body.
+        loadSecrets: async () => {
+          if (ngoId === 'a') throw new Error('D1_ERROR: connection reset')
+          return { accessTokenEnc: 'enc-access', refreshTokenEnc: 'enc-refresh' }
+        },
+        upsert: async (c) => { upsertedByNgo[ngoId]!.push(c) },
+      }))
+    }
+
+    expect(upsertedByNgo.a).toEqual([])
+    expect(upsertedByNgo.b).toEqual([expect.objectContaining({ mpPaymentId: 'p1', goalId: 'g1' })])
   })
 })
