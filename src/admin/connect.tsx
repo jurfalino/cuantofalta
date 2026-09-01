@@ -62,13 +62,31 @@ connectRoutes.get('/oauth/callback', async (c) => {
     redirectUri: `${c.env.PUBLIC_BASE_URL}/oauth/callback`,
   })
 
-  await saveNgoTokens(db(c.env.DB), {
+  const { rowsChanged } = await saveNgoTokens(db(c.env.DB), {
     ngoId,
     accessTokenEnc: await encryptToken(tokens.accessToken, c.env.TOKEN_KEY),
     refreshTokenEnc: await encryptToken(tokens.refreshToken, c.env.TOKEN_KEY),
     tokenExpiresAt: new Date(Date.now() + tokens.expiresInSeconds * 1000).toISOString(),
     mpUserId: tokens.mpUserId,
   })
+
+  // The connect-link token verified above only proves the ngoId was one we
+  // signed — it does not prove a row with that id still exists. If it
+  // doesn't, saveNgoTokens updated zero rows: real MP tokens were just
+  // granted to us and would otherwise be silently discarded while this
+  // page claims success. That must never read as "Cuenta conectada".
+  if (rowsChanged === 0) {
+    return c.html(
+      <html lang="es"><body>
+        <h1>No se pudo completar la conexión</h1>
+        <p>
+          La organización no existe en la plataforma. Pedile a la persona operadora que la cree
+          antes de generar un nuevo enlace de conexión.
+        </p>
+      </body></html>,
+      500,
+    )
+  }
 
   return c.html(<html lang="es"><body><h1>Cuenta conectada</h1><p>Ya podés cerrar esta ventana.</p></body></html>)
 })
