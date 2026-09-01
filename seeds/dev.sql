@@ -1,4 +1,4 @@
-INSERT OR REPLACE INTO ngo (id, name, slug, status) VALUES ('n1', 'Refugio Patitas', 'patitas', 'pending');
+INSERT OR IGNORE INTO ngo (id, name, slug, status) VALUES ('n1', 'Refugio Patitas', 'patitas', 'pending');
 INSERT OR REPLACE INTO goal (id, ngo_id, title, description, target_amount_cents, created_at)
   VALUES ('g1', 'n1', 'Campaña de castración', 'Castrar 50 gatos comunitarios.', 100000000, '2026-08-31T00:00:00Z');
 INSERT OR REPLACE INTO contribution (id, goal_id, source, mp_payment_id, amount_cents, status, paid_at, note, created_at)

@@ -56,3 +56,26 @@ export async function addManualContribution(d: Db, input: {
     paidAt: now, note: input.note, createdAt: now,
   })
 }
+
+export async function saveNgoTokens(d: Db, input: {
+  ngoId: string; accessTokenEnc: string; refreshTokenEnc: string
+  tokenExpiresAt: string; mpUserId: string
+}): Promise<void> {
+  await d.update(s.ngo).set({
+    accessTokenEnc: input.accessTokenEnc,
+    refreshTokenEnc: input.refreshTokenEnc,
+    tokenExpiresAt: input.tokenExpiresAt,
+    mpUserId: input.mpUserId,
+    status: 'connected',
+    connectedAt: new Date().toISOString(),
+  }).where(eq(s.ngo.id, input.ngoId))
+}
+
+export async function getNgoSecrets(d: Db, ngoId: string) {
+  const rows = await d.select().from(s.ngo).where(eq(s.ngo.id, ngoId)).limit(1)
+  return rows[0] ?? null
+}
+
+export async function markNgoDisconnected(d: Db, ngoId: string): Promise<void> {
+  await d.update(s.ngo).set({ status: 'disconnected' }).where(eq(s.ngo.id, ngoId))
+}
