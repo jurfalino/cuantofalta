@@ -1368,7 +1368,7 @@ connectRoutes.get('/oauth/callback', async (c) => {
 
 Mount in `src/index.ts` with `app.route('/', connectRoutes)`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add -A
@@ -1783,15 +1783,45 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 ```
 
-- [ ] **Step 6: End-to-end verification**
+- [ ] **Step 6: PRE-FLIGHT — verify `external_reference` propagates**
 
-1. Open `/conectar/n1` as the test-user NGO; approve. Expect "Cuenta conectada" and `ngo.status = 'connected'`.
-2. Create a goal via admin.
-3. Donate from the public page using card `4509 9535 6623 3704`, cardholder `APRO`, DNI `12345678`.
-4. Wait for the cron tick (≤2 min), reload the goal page. Expect the bar to move.
-5. Repeat with cardholder `OTHE` and `CONT`. Expect the bar **not** to move.
+This was Task 6's Step 1, deferred here because it needs sandbox credentials. **Run it
+before Step 7.** The whole attribution model assumes an `external_reference` set on a
+*preference* appears on the resulting *payment*.
 
-- [ ] **Step 7: Commit**
+Using the test-user access token, create a preference with `external_reference:
+"probe-goal-1"`, pay it with card `4509 9535 6623 3704`, CVV `123`, exp `11/30`,
+cardholder `APRO`, DNI `12345678`. Then:
+
+```bash
+curl -s -H "Authorization: Bearer $MP_TEST_TOKEN" \
+  "https://api.mercadopago.com/v1/payments/search?external_reference=probe-goal-1" | head -40
+```
+
+Expected: one payment with `"external_reference": "probe-goal-1"` and `"status": "approved"`.
+
+**If it does not propagate:** STOP and report. The fix is to persist `preference_id →
+goal_id` at creation time and attribute on the payment's order id instead — a change to
+`attributePayments` and the preference-creation path, not a redesign.
+
+- [ ] **Step 7: End-to-end verification**
+
+The connect flow is **two steps** (the single `/conectar/:ngoId` route was removed as a
+money-redirection vulnerability: it minted a valid signed state for any NGO id to any
+anonymous caller).
+
+1. As the operator, `GET /admin/ngo/n1/connect-link` with the operator bearer token.
+   Expect a URL containing a signed capability token.
+2. Open that URL (`/conectar?t=...`) as the test-user NGO and approve. Expect "Cuenta
+   conectada" and `ngo.status = 'connected'`.
+3. Confirm a tampered or expired `t` returns 400 and does **not** redirect to Mercado Pago.
+4. Create a goal via admin.
+5. Donate from the public page using card `4509 9535 6623 3704`, cardholder `APRO`,
+   DNI `12345678`.
+6. Wait for the cron tick (≤2 min), reload the goal page. Expect the bar to move.
+7. Repeat with cardholder `OTHE` and `CONT`. Expect the bar **not** to move.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add -A
