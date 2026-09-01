@@ -44,7 +44,13 @@ export async function listConnectedNgos(d: Db): Promise<Ngo[]> {
 // where a `pending` (never connected) or `disconnected` NGO is exactly what
 // the operator needs to see, not just the connected ones.
 export async function listNgos(d: Db): Promise<Ngo[]> {
-  const rows = await d.select().from(s.ngo)
+  // Narrow projection, same reasoning as getNgoById below: never select the
+  // token ciphertext columns for a page that only ever needs to render
+  // id/name/slug/status.
+  const rows = await d.select({
+    id: s.ngo.id, name: s.ngo.name, slug: s.ngo.slug,
+    mpUserId: s.ngo.mpUserId, status: s.ngo.status,
+  }).from(s.ngo)
   return rows.map((r) => ({
     id: r.id, name: r.name, slug: r.slug,
     mpUserId: r.mpUserId, status: r.status as Ngo['status'],

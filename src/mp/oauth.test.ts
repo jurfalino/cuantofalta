@@ -106,6 +106,26 @@ describe('signPayload / verifyPayload', () => {
     expect(await verifyPayload(stateToken, key, now, 'connect')).toBeNull()
   })
 
+  // Finding 4 requires this to hold in every direction between the three
+  // purposes, not just connect<->oauth-state: an NGO legitimately holds a
+  // valid 'connect' token out-of-band, so if that (or an in-flight
+  // 'oauth-state') were ever accepted as an 'operator-session', it would
+  // be full operator access to every NGO's goals.
+  it('rejects every other purpose pairing too, including against operator-session', async () => {
+    const key = await generateKeyBase64()
+    const connectToken = await signPayload('connect', 'ngo-1', key, now, CONNECT_LINK_TTL_SECONDS)
+    const stateToken = await signPayload('oauth-state', 'ngo-1', key, now, OAUTH_STATE_TTL_SECONDS)
+    const sessionToken = await signPayload('operator-session', 'operator', key, now, 8 * 60 * 60)
+
+    expect(await verifyPayload(stateToken, key, now, 'operator-session')).toBeNull()
+    expect(await verifyPayload(connectToken, key, now, 'operator-session')).toBeNull()
+    expect(await verifyPayload(sessionToken, key, now, 'connect')).toBeNull()
+    expect(await verifyPayload(sessionToken, key, now, 'oauth-state')).toBeNull()
+
+    // And each token still verifies fine under its own purpose.
+    expect(await verifyPayload(sessionToken, key, now, 'operator-session')).toBe('operator')
+  })
+
   it('rejects a tampered payload', async () => {
     const key = await generateKeyBase64()
     const token = await signPayload('oauth-state', 'ngo-1', key, now, OAUTH_STATE_TTL_SECONDS)

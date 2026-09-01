@@ -114,6 +114,16 @@ describe('requireOperator', () => {
     expect(res.status).toBe(401)
   })
 
+  it('rejects a cross-purpose token (an oauth-state) presented as a session cookie', async () => {
+    const app = buildApp()
+    const env = await buildEnv()
+    const stateToken = await signPayload('oauth-state', 'operator', env.TOKEN_KEY, new Date(), 10 * 60)
+    const res = await app.request('/admin/secret', {
+      headers: { cookie: `${OPERATOR_SESSION_COOKIE}=${stateToken}`, accept: 'application/json' },
+    }, env)
+    expect(res.status).toBe(401)
+  })
+
   it('redirects a credential-less browser GET to the login page', async () => {
     const app = buildApp()
     const env = await buildEnv()
@@ -144,10 +154,10 @@ describe('requireOperator', () => {
     expect(res.status).toBe(401)
   })
 
-  it('rejects when no credential of any kind is present', async () => {
+  it('rejects when no credential of any kind is present (no Accept header -> the non-browser branch)', async () => {
     const app = buildApp()
     const env = await buildEnv()
     const res = await app.request('/admin/secret', {}, env)
-    expect(res.status).not.toBe(200)
+    expect(res.status).toBe(401)
   })
 })
