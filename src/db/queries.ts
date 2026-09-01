@@ -39,3 +39,20 @@ export async function listConnectedNgos(d: Db): Promise<Ngo[]> {
     mpUserId: r.mpUserId, status: r.status as Ngo['status'],
   }))
 }
+
+export async function createGoal(d: Db, input: {
+  id: string; ngoId: string; title: string; description: string; targetAmountCents: number
+}): Promise<void> {
+  await d.insert(s.goal).values({ ...input, createdAt: new Date().toISOString() })
+}
+
+export async function addManualContribution(d: Db, input: {
+  id: string; goalId: string; amountCents: number; note: string
+}): Promise<void> {
+  const now = new Date().toISOString()
+  await d.insert(s.contribution).values({
+    id: input.id, goalId: input.goalId, source: 'manual', mpPaymentId: null,
+    amountCents: input.amountCents, status: 'approved',
+    paidAt: now, note: input.note, createdAt: now,
+  })
+}
