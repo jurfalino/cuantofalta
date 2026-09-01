@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createTestDb } from './testDb'
 import {
   createGoal, upsertPlatformContribution, listPendingPlatformContributions,
-  createNgo, saveNgoTokens, getNgoById, listNgos,
+  createNgo, saveNgoTokens, getNgoById, listNgos, isUniqueConstraintError,
 } from './queries'
 import * as s from './schema'
 
@@ -69,6 +69,34 @@ describe('createNgo', () => {
     await createNgo(d, { id: 'ngo-1', name: 'Refugio', slug: 'refugio' })
     await expect(createNgo(d, { id: 'ngo-2', name: 'Otro', slug: 'refugio' })).rejects.toThrow()
     expect(await listNgos(d)).toHaveLength(1)
+  })
+
+  it('the thrown error is recognized by isUniqueConstraintError, even through drizzle-orm/d1\'s wrapping', async () => {
+    const d = createTestDb()
+    await createNgo(d, { id: 'ngo-1', name: 'Refugio', slug: 'refugio' })
+    let caught: unknown
+    try {
+      await createNgo(d, { id: 'ngo-2', name: 'Otro', slug: 'refugio' })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeDefined()
+    expect(isUniqueConstraintError(caught)).toBe(true)
+  })
+})
+
+describe('isUniqueConstraintError', () => {
+  it('returns false for an unrelated error', () => {
+    expect(isUniqueConstraintError(new Error('boom'))).toBe(false)
+  })
+  it('returns false for null/undefined', () => {
+    expect(isUniqueConstraintError(null)).toBe(false)
+    expect(isUniqueConstraintError(undefined)).toBe(false)
+  })
+  it('finds the message on a nested .cause', () => {
+    const inner = new Error('UNIQUE constraint failed: ngo.slug')
+    const outer = new Error('Failed query', { cause: inner })
+    expect(isUniqueConstraintError(outer)).toBe(true)
   })
 })
 

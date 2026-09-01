@@ -3,7 +3,7 @@ import { html } from 'hono/html'
 import { requireOperator, isValidOperatorSecret, mintOperatorSessionToken, setOperatorSessionCookie } from './auth'
 import {
   db, listGoalsByNgo, createGoal, addManualContribution, listContributions,
-  createNgo, listNgos, getNgoById,
+  createNgo, listNgos, getNgoById, isUniqueConstraintError,
 } from '../db/queries'
 import { computeProgress } from '../goals/progress'
 import { formatArs, formatArsBreakdown } from '../public/views'
@@ -75,7 +75,7 @@ adminRoutes.post('/admin/ngo', async (c) => {
   try {
     await createNgo(db(c.env.DB), { id: crypto.randomUUID(), name, slug })
   } catch (err) {
-    if (String(err).includes('UNIQUE constraint failed')) {
+    if (isUniqueConstraintError(err)) {
       return c.text('Ya existe una organización con ese slug. Elegí otro.', 409)
     }
     throw err

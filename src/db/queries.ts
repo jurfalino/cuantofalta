@@ -67,6 +67,21 @@ export async function createNgo(d: Db, input: { id: string; name: string; slug: 
   await d.insert(s.ngo).values({ id: input.id, name: input.name, slug: input.slug })
 }
 
+// drizzle-orm/d1 wraps the underlying driver error in a DrizzleQueryError,
+// whose own message is just "Failed query: ..." — the actual
+// "UNIQUE constraint failed" text (from D1 in production, or from
+// better-sqlite3 in tests) lives on `.cause`, sometimes nested more than
+// one level deep. Walks the cause chain rather than trusting
+// `String(err)` alone, which would otherwise miss this every time.
+export function isUniqueConstraintError(err: unknown): boolean {
+  let current: unknown = err
+  for (let i = 0; i < 5 && current; i++) {
+    if (String(current).includes('UNIQUE constraint failed')) return true
+    current = current instanceof Error ? current.cause : undefined
+  }
+  return false
+}
+
 export async function createGoal(d: Db, input: {
   id: string; ngoId: string; title: string; description: string; targetAmountCents: number
 }): Promise<void> {
