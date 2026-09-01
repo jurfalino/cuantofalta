@@ -1809,6 +1809,22 @@ Expected: one payment with `"external_reference": "probe-goal-1"` and `"status":
 goal_id` at creation time and attribute on the payment's order id instead — a change to
 `attributePayments` and the preference-creation path, not a redesign.
 
+- [ ] **Step 6b: PRE-FLIGHT — two real-D1 confirmations**
+
+Both were verified only against a `better-sqlite3` shim, because the installed Miniflare
+alpha has a broken constructor. Two requests close them.
+
+1. **`meta.changes` on a zero-match UPDATE.** Mint a connect link for an ngo id that has
+   no row, complete the OAuth approval, and confirm the Spanish **error** page appears —
+   not "Cuenta conectada". Then do one real connect and confirm "Cuenta conectada" does
+   appear. This is the safety net for the silent-zero-row bug; it fails closed (a missing
+   `changes` field renders the error page on a *successful* save), so a wrong result is
+   loud on the first connect rather than silent.
+2. **D1's UNIQUE-constraint error text.** Create an NGO, then create another with the same
+   slug. Expect the Spanish 409, not the generic 500 error page. `isUniqueConstraintError`
+   matches the literal string `UNIQUE constraint failed`; if D1 words it differently the
+   duplicate degrades to a 500 — graceful, but worth knowing.
+
 - [ ] **Step 7: End-to-end verification**
 
 The connect flow is **two steps** (the single `/conectar/:ngoId` route was removed as a
