@@ -36,3 +36,27 @@ describe('FakeMercadoPago', () => {
     })).rejects.toThrow('401')
   })
 })
+
+describe('FakeMercadoPago.getPayment', () => {
+  it('finds a seeded payment by id, regardless of date', async () => {
+    const mp = new FakeMercadoPago()
+    mp.seedPayment({
+      id: 'p1', status: 'pending', transactionAmountCents: 50_000,
+      externalReference: 'g1', dateApproved: null,
+    })
+    const found = await mp.getPayment({ accessToken: 't', paymentId: 'p1' })
+    expect(found?.id).toBe('p1')
+    expect(found?.status).toBe('pending')
+  })
+
+  it('returns null for an unknown payment id, like a 404', async () => {
+    const mp = new FakeMercadoPago()
+    expect(await mp.getPayment({ accessToken: 't', paymentId: 'nope' })).toBeNull()
+  })
+
+  it('throws the configured auth error so refresh logic can be tested', async () => {
+    const mp = new FakeMercadoPago()
+    mp.failNextWith401 = true
+    await expect(mp.getPayment({ accessToken: 'stale', paymentId: 'p1' })).rejects.toThrow('401')
+  })
+})

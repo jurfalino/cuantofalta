@@ -39,6 +39,65 @@ export function isAuthError(err: unknown): boolean {
   return String(err).includes('401')
 }
 
+export interface PendingContributionRef {
+  id: string
+  goalId: string
+  mpPaymentId: string
+}
+
+// Re-checks contributions that were ingested as `pending` and never
+// revisited, regardless of how long ago they were paid — this is what
+// actually closes the "efectivo settles days later" hole (see
+// src/index.ts): the poller's normal lookback window only ever looks at
+// *recently created* payments, so a payment that ages out of that window
+// while still pending would otherwise never be looked at again.
+//
+// A failure on ONE payment (a transient network blip, a payment MP no
+// longer serves for some other reason) must not abort the rest of the
+// list — only a genuine 401 propagates, so withTokenRefresh around this
+// can do its one retry-with-refresh. A 404 (payment not found) is treated
+// the same as "still pending": we do not know it was rejected, so we must
+// not upsert a `rejected` status we don't actually have evidence for.
+export async function recheckPendingContributions(deps: {
+  client: MercadoPagoClient
+  accessToken: string
+  pending: PendingContributionRef[]
+  upsert: (c: Contribution) => Promise<void>
+}): Promise<{ updated: number; stillPending: number }> {
+  let updated = 0
+  let stillPending = 0
+
+  for (const p of deps.pending) {
+    let payment: MpPayment | null
+    try {
+      payment = await deps.client.getPayment({ accessToken: deps.accessToken, paymentId: p.mpPaymentId })
+    } catch (err) {
+      if (isAuthError(err)) throw err
+      stillPending++
+      continue
+    }
+
+    if (!payment || payment.status === 'pending') {
+      stillPending++
+      continue
+    }
+
+    await deps.upsert({
+      id: p.id,
+      goalId: p.goalId,
+      source: 'platform',
+      mpPaymentId: p.mpPaymentId,
+      amountCents: payment.transactionAmountCents,
+      status: payment.status,
+      paidAt: payment.dateApproved ?? new Date(0).toISOString(),
+      note: null,
+    })
+    updated++
+  }
+
+  return { updated, stillPending }
+}
+
 // Thrown when the first attempt 401s AND the subsequent refresh() itself
 // fails (e.g. a revoked/expired refresh token). Distinguished from a bare
 // 401 so the caller can tell "never even tried to refresh" apart from
@@ -85,6 +144,7 @@ export async function ingestOneNgo(deps: {
   now: Date
   loadSecrets: () => Promise<{ accessTokenEnc: string | null; refreshTokenEnc: string | null } | null>
   loadGoalIds: () => Promise<string[]>
+  loadPendingContributions: () => Promise<PendingContributionRef[]>
   decrypt: (encrypted: string) => Promise<string>
   refresh: (refreshTokenEnc: string) => Promise<string>
   upsert: (c: Contribution) => Promise<void>
@@ -97,17 +157,30 @@ export async function ingestOneNgo(deps: {
     const refreshTokenEnc = secrets.refreshTokenEnc
 
     const goalIds = await deps.loadGoalIds()
+    const pending = await deps.loadPendingContributions()
     const stored = await deps.decrypt(secrets.accessTokenEnc)
 
     await withTokenRefresh({
-      run: (token) => ingestForNgo({
-        client: deps.client,
-        accessToken: token ?? stored,
-        goalIds,
-        since: deps.since,
-        now: deps.now,
-        upsert: deps.upsert,
-      }),
+      run: async (token) => {
+        const accessToken = token ?? stored
+        await ingestForNgo({
+          client: deps.client,
+          accessToken,
+          goalIds,
+          since: deps.since,
+          now: deps.now,
+          upsert: deps.upsert,
+        })
+        // Same access token, same per-NGO try/catch: a 401 here is handled
+        // by this same withTokenRefresh retry-once, and a disconnect from
+        // a failed refresh covers both phases identically to before.
+        await recheckPendingContributions({
+          client: deps.client,
+          accessToken,
+          pending,
+          upsert: deps.upsert,
+        })
+      },
       refresh: () => deps.refresh(refreshTokenEnc),
     })
   } catch (err) {

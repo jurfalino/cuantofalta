@@ -1,4 +1,4 @@
-import type { MercadoPagoClient, MpPayment, CreatePreferenceInput, SearchPaymentsInput } from './client'
+import type { MercadoPagoClient, MpPayment, CreatePreferenceInput, SearchPaymentsInput, GetPaymentInput } from './client'
 
 export class FakeMercadoPago implements MercadoPagoClient {
   payments: MpPayment[] = []
@@ -22,5 +22,13 @@ export class FakeMercadoPago implements MercadoPagoClient {
       const when = p.dateApproved ?? ''
       return when >= input.beginDate && when <= input.endDate
     })
+  }
+
+  async getPayment(input: GetPaymentInput): Promise<MpPayment | null> {
+    if (this.failNextWith401) {
+      this.failNextWith401 = false
+      throw new Error('MP getPayment failed: 401')
+    }
+    return this.payments.find((p) => p.id === input.paymentId) ?? null
   }
 }

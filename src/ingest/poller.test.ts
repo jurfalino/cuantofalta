@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { attributePayments, withTokenRefresh, ingestForNgo, ingestOneNgo, TokenRefreshFailedError } from './poller'
+import {
+  attributePayments, withTokenRefresh, ingestForNgo, ingestOneNgo, recheckPendingContributions,
+  TokenRefreshFailedError,
+} from './poller'
 import { FakeMercadoPago } from '../mp/fake'
 import type { MpPayment } from '../mp/client'
 
@@ -152,6 +155,92 @@ describe('ingestForNgo', () => {
   })
 })
 
+describe('recheckPendingContributions', () => {
+  it('upserts a payment that has since settled to approved', async () => {
+    const fake = new FakeMercadoPago()
+    fake.seedPayment({
+      id: 'p1', status: 'approved', transactionAmountCents: 30_000,
+      externalReference: 'g1', dateApproved: '2026-09-02T10:00:00Z',
+    })
+    const upserted: unknown[] = []
+    const result = await recheckPendingContributions({
+      client: fake,
+      accessToken: 'tok',
+      pending: [{ id: 'mp-p1', goalId: 'g1', mpPaymentId: 'p1' }],
+      upsert: async (c) => { upserted.push(c) },
+    })
+    expect(result).toEqual({ updated: 1, stillPending: 0 })
+    expect(upserted).toEqual([expect.objectContaining({ status: 'approved', amountCents: 30_000 })])
+  })
+
+  it('leaves a still-pending payment alone (no upsert) rather than writing a false status', async () => {
+    const fake = new FakeMercadoPago()
+    fake.seedPayment({
+      id: 'p1', status: 'pending', transactionAmountCents: 30_000,
+      externalReference: 'g1', dateApproved: null,
+    })
+    const upserted: unknown[] = []
+    const result = await recheckPendingContributions({
+      client: fake, accessToken: 'tok',
+      pending: [{ id: 'mp-p1', goalId: 'g1', mpPaymentId: 'p1' }],
+      upsert: async (c) => { upserted.push(c) },
+    })
+    expect(result).toEqual({ updated: 0, stillPending: 1 })
+    expect(upserted).toEqual([])
+  })
+
+  it('treats a payment MP no longer has (404 / null) as still-pending, never as rejected', async () => {
+    const fake = new FakeMercadoPago() // no seeded payments -> getPayment returns null
+    const upserted: unknown[] = []
+    const result = await recheckPendingContributions({
+      client: fake, accessToken: 'tok',
+      pending: [{ id: 'mp-gone', goalId: 'g1', mpPaymentId: 'gone' }],
+      upsert: async (c) => { upserted.push(c) },
+    })
+    expect(result).toEqual({ updated: 0, stillPending: 1 })
+    expect(upserted).toEqual([])
+  })
+
+  it('a non-auth failure on one payment does not abort the rest of the list', async () => {
+    const fake = new FakeMercadoPago()
+    fake.seedPayment({
+      id: 'p2', status: 'approved', transactionAmountCents: 10_000,
+      externalReference: 'g1', dateApproved: '2026-09-02T10:00:00Z',
+    })
+    let calls = 0
+    const flaky: typeof fake = {
+      ...fake,
+      getPayment: async (input: { accessToken: string; paymentId: string }) => {
+        calls++
+        if (input.paymentId === 'p1') throw new Error('MP getPayment failed: 500')
+        return fake.getPayment(input)
+      },
+    } as unknown as typeof fake
+    const upserted: unknown[] = []
+    const result = await recheckPendingContributions({
+      client: flaky, accessToken: 'tok',
+      pending: [
+        { id: 'mp-p1', goalId: 'g1', mpPaymentId: 'p1' },
+        { id: 'mp-p2', goalId: 'g1', mpPaymentId: 'p2' },
+      ],
+      upsert: async (c) => { upserted.push(c) },
+    })
+    expect(calls).toBe(2)
+    expect(result).toEqual({ updated: 1, stillPending: 1 })
+    expect(upserted).toEqual([expect.objectContaining({ mpPaymentId: 'p2' })])
+  })
+
+  it('propagates a 401 rather than swallowing it, so withTokenRefresh can retry', async () => {
+    const fake = new FakeMercadoPago()
+    fake.failNextWith401 = true
+    await expect(recheckPendingContributions({
+      client: fake, accessToken: 'stale',
+      pending: [{ id: 'mp-p1', goalId: 'g1', mpPaymentId: 'p1' }],
+      upsert: async () => {},
+    })).rejects.toThrow('401')
+  })
+})
+
 describe('ingestOneNgo', () => {
   const baseDeps = (over: Partial<Parameters<typeof ingestOneNgo>[0]> = {}) => ({
     ngoId: 'ngo-1',
@@ -160,6 +249,7 @@ describe('ingestOneNgo', () => {
     now: new Date('2026-08-31T23:59:59Z'),
     loadSecrets: async () => ({ accessTokenEnc: 'enc-access', refreshTokenEnc: 'enc-refresh' }),
     loadGoalIds: async () => ['g1'],
+    loadPendingContributions: async () => [],
     decrypt: async () => 'plain-token',
     refresh: async () => 'fresh-token',
     upsert: async () => {},
@@ -214,6 +304,23 @@ describe('ingestOneNgo', () => {
     }))
     expect(disconnected).toBe(false)
     expect(upserts).toBe(0)
+  })
+
+  it('also recheck-upserts a contribution that was pending outside the normal lookback window', async () => {
+    const fake = new FakeMercadoPago()
+    // Settled now, but its date_approved is long before `since` — the
+    // normal searchPayments window would never see it again.
+    fake.seedPayment({
+      id: 'old-1', status: 'approved', transactionAmountCents: 40_000,
+      externalReference: 'g1', dateApproved: '2020-01-01T00:00:00Z',
+    })
+    const upserted: unknown[] = []
+    await ingestOneNgo(baseDeps({
+      client: fake,
+      loadPendingContributions: async () => [{ id: 'mp-old-1', goalId: 'g1', mpPaymentId: 'old-1' }],
+      upsert: async (c) => { upserted.push(c) },
+    }))
+    expect(upserted).toEqual([expect.objectContaining({ mpPaymentId: 'old-1', status: 'approved' })])
   })
 
   it('one NGO throwing at every stage does not prevent the next NGO in a loop from ingesting successfully', async () => {
