@@ -25,6 +25,14 @@ export interface MercadoPagoClient {
   searchPayments(input: SearchPaymentsInput): Promise<MpPayment[]>
 }
 
+export function normalizePaymentStatus(raw: unknown): MpPayment['status'] {
+  if (raw === 'approved') return 'approved'
+  if (raw === 'pending' || raw === 'in_process' || raw === 'authorized' || raw === 'in_mediation') {
+    return 'pending'
+  }
+  return 'rejected'
+}
+
 const API = 'https://api.mercadopago.com'
 
 export class LiveMercadoPago implements MercadoPagoClient {
@@ -61,7 +69,7 @@ export class LiveMercadoPago implements MercadoPagoClient {
     const j = (await res.json()) as { results: Array<Record<string, any>> }
     return j.results.map((r) => ({
       id: String(r.id),
-      status: r.status,
+      status: normalizePaymentStatus(r.status),
       transactionAmountCents: Math.round(Number(r.transaction_amount) * 100),
       externalReference: r.external_reference ?? null,
       dateApproved: r.date_approved ?? null,
