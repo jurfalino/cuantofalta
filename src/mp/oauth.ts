@@ -7,7 +7,6 @@ export interface TokenSet {
 
 const AUTH_URL = 'https://auth.mercadopago.com/authorization'
 const TOKEN_URL = 'https://api.mercadopago.com/oauth/token'
-const STATE_TTL_SECONDS = 10 * 60
 
 export function buildAuthorizeUrl(input: {
   clientId: string; redirectUri: string; state: string
@@ -24,6 +23,9 @@ export function buildAuthorizeUrl(input: {
 export function parseTokenResponse(payload: Record<string, any>): TokenSet {
   if (!payload.access_token) {
     throw new Error(`MP OAuth error: ${payload.error ?? 'no access_token in response'}`)
+  }
+  if (!payload.refresh_token) {
+    throw new Error(`MP OAuth error: ${payload.error ?? 'no refresh_token in response'}`)
   }
   return {
     accessToken: payload.access_token,
@@ -66,16 +68,27 @@ export async function refreshAccessToken(input: {
   })
 }
 
-// --- Signed OAuth state ---
+// --- Signed, purpose-scoped payloads ---
 //
-// The `state` parameter round-trips through Mercado Pago's servers and back
-// to our callback, so it cannot be trusted as-is: anyone could call the
-// callback with an arbitrary `state` value and bind their own Mercado Pago
-// account to any NGO's row. Signing it with an HMAC over TOKEN_KEY (and
-// checking a short expiry) means only a state we minted ourselves, recently,
-// will be accepted.
+// Two different values in this flow round-trip through an outside party
+// before coming back to us — the connect link we hand the NGO, and the
+// `state` parameter that bounces through Mercado Pago — so neither can be
+// trusted as-is. Signing closes *tampering*: only a payload we minted,
+// unmodified, will verify. It does not by itself close *misuse*: without a
+// `purpose` field, a 24-hour connect-link capability could be replayed
+// straight into the OAuth callback as if it were a 10-minute state (or vice
+// versa). `signPayload`/`verifyPayload` are one HMAC-SHA256 (over TOKEN_KEY)
+// primitive shared by both call sites; `verifyPayload` only returns the
+// ngoId when the signature checks out, the payload is unexpired, AND its
+// `purpose` matches what the caller expects.
 
-interface StatePayload {
+export const CONNECT_LINK_TTL_SECONDS = 24 * 60 * 60
+export const OAUTH_STATE_TTL_SECONDS = 10 * 60
+
+export type SignedPurpose = 'connect' | 'oauth-state'
+
+interface SignedPayload {
+  purpose: SignedPurpose
   ngoId: string
   nonce: string
   exp: number
@@ -106,11 +119,14 @@ async function importHmacKey(keyBase64: string): Promise<CryptoKey> {
   return crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
 }
 
-export async function signState(ngoId: string, key: string, now: Date): Promise<string> {
-  const payload: StatePayload = {
+export async function signPayload(
+  purpose: SignedPurpose, ngoId: string, key: string, now: Date, ttlSeconds: number,
+): Promise<string> {
+  const payload: SignedPayload = {
+    purpose,
     ngoId,
     nonce: crypto.randomUUID(),
-    exp: Math.floor(now.getTime() / 1000) + STATE_TTL_SECONDS,
+    exp: Math.floor(now.getTime() / 1000) + ttlSeconds,
   }
   const payloadB64 = textToBase64Url(JSON.stringify(payload))
   const hmacKey = await importHmacKey(key)
@@ -118,9 +134,11 @@ export async function signState(ngoId: string, key: string, now: Date): Promise<
   return `${payloadB64}.${bytesToBase64Url(new Uint8Array(signature))}`
 }
 
-export async function verifyState(state: string, key: string, now: Date): Promise<string | null> {
+export async function verifyPayload(
+  token: string, key: string, now: Date, expectedPurpose: SignedPurpose,
+): Promise<string | null> {
   try {
-    const parts = state.split('.')
+    const parts = token.split('.')
     if (parts.length !== 2) return null
     const [payloadB64, sigB64] = parts
     if (!payloadB64 || !sigB64) return null
@@ -134,8 +152,9 @@ export async function verifyState(state: string, key: string, now: Date): Promis
     )
     if (!signatureValid) return null
 
-    const payload = JSON.parse(base64UrlToText(payloadB64)) as Partial<StatePayload>
+    const payload = JSON.parse(base64UrlToText(payloadB64)) as Partial<SignedPayload>
     if (typeof payload.ngoId !== 'string' || typeof payload.exp !== 'number') return null
+    if (payload.purpose !== expectedPurpose) return null
     if (Math.floor(now.getTime() / 1000) >= payload.exp) return null
 
     return payload.ngoId
