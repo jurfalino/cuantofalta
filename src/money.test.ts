@@ -52,4 +52,14 @@ describe('parsePesosToCents', () => {
     expect(result).toBe(1999)
     expect(Number.isInteger(result)).toBe(true)
   })
+
+  it('rejects an amount far beyond any plausible goal, rather than silently overflowing to an unsafe integer', () => {
+    expect(parsePesosToCents('99999999999999999.99')).toBeNull()
+  })
+  it('accepts an amount right at the ceiling', () => {
+    expect(parsePesosToCents('1000000000')).toBe(100_000_000_000)
+  })
+  it('rejects an amount just over the ceiling', () => {
+    expect(parsePesosToCents('1000000000.01')).toBeNull()
+  })
 })
