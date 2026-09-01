@@ -23,6 +23,29 @@ app.route('/', adminRoutes)
 app.route('/', connectRoutes)
 app.get('/', (c) => c.text('Cuánto Falta'))
 
+// Catches whatever an unhandled throw would otherwise turn into Hono's
+// bare English "Internal Server Error" — donor- and NGO-facing paths that
+// have no try/catch of their own (createPreference/decryptToken in
+// public/donate.tsx, exchangeCode in admin/connect.tsx, among others) hit
+// this every time they fail, and the Spanish copy used everywhere else
+// must not suddenly break there. The response is a fixed, static string:
+// it never includes `err.message`/`err.stack`, so a decrypt failure or a
+// thrown token can never end up rendered to a client. The error itself is
+// still logged server-side for operators.
+app.onError((err, c) => {
+  console.error('unhandled error:', err)
+  return c.html(
+    '<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">'
+    + '<title>Error — Cuánto Falta</title></head><body>'
+    + '<h1>Ocurrió un error</h1>'
+    + '<p>Algo salió mal de nuestro lado. Probá de nuevo en unos minutos.</p>'
+    + '</body></html>',
+    500,
+  )
+})
+
+export { app }
+
 export default {
   fetch: app.fetch,
   // Awaited directly rather than handed to ctx.waitUntil: a Worker's
