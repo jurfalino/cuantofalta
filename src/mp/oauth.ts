@@ -78,14 +78,22 @@ export async function refreshAccessToken(input: {
 // `purpose` field, a 24-hour connect-link capability could be replayed
 // straight into the OAuth callback as if it were a 10-minute state (or vice
 // versa). `signPayload`/`verifyPayload` are one HMAC-SHA256 (over TOKEN_KEY)
-// primitive shared by both call sites; `verifyPayload` only returns the
-// ngoId when the signature checks out, the payload is unexpired, AND its
-// `purpose` matches what the caller expects.
+// primitive shared by all call sites; `verifyPayload` only returns the
+// payload's `ngoId` field when the signature checks out, the payload is
+// unexpired, AND its `purpose` matches what the caller expects.
+//
+// The admin session cookie (`operator-session`, see src/admin/auth.ts)
+// reuses this same primitive even though it never leaves our own
+// Set-Cookie/Cookie headers — it still benefits from tamper-evidence, an
+// expiry, and purpose-scoping (a stolen connect link or oauth-state token
+// must not double as a valid admin session, or vice versa). Its `ngoId`
+// field carries a constant subject rather than a real NGO id.
 
 export const CONNECT_LINK_TTL_SECONDS = 24 * 60 * 60
 export const OAUTH_STATE_TTL_SECONDS = 10 * 60
+export const OPERATOR_SESSION_TTL_SECONDS = 8 * 60 * 60
 
-export type SignedPurpose = 'connect' | 'oauth-state'
+export type SignedPurpose = 'connect' | 'oauth-state' | 'operator-session'
 
 interface SignedPayload {
   purpose: SignedPurpose
