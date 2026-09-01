@@ -4,6 +4,7 @@ import { requireOperator } from './auth'
 import { db, listGoalsByNgo, createGoal, addManualContribution, listContributions } from '../db/queries'
 import { computeProgress } from '../goals/progress'
 import { formatArs } from '../public/views'
+import { parsePesosToCents } from '../money'
 import type { Env } from '../env'
 
 export const adminRoutes = new Hono<{ Bindings: Env }>()
@@ -43,22 +44,26 @@ adminRoutes.get('/admin/ngo/:ngoId', async (c) => {
 
 adminRoutes.post('/admin/goal', async (c) => {
   const f = await c.req.formData()
+  const targetAmountCents = parsePesosToCents(f.get('targetPesos'))
+  if (targetAmountCents === null) return c.text('Monto inválido', 400)
   await createGoal(db(c.env.DB), {
     id: crypto.randomUUID(),
     ngoId: String(f.get('ngoId')),
     title: String(f.get('title')),
     description: String(f.get('description') ?? ''),
-    targetAmountCents: Number(f.get('targetPesos')) * 100,
+    targetAmountCents,
   })
   return c.redirect(`/admin/ngo/${f.get('ngoId')}`)
 })
 
 adminRoutes.post('/admin/goal/:goalId/manual', async (c) => {
   const f = await c.req.formData()
+  const amountCents = parsePesosToCents(f.get('montoPesos'))
+  if (amountCents === null) return c.text('Monto inválido', 400)
   await addManualContribution(db(c.env.DB), {
     id: crypto.randomUUID(),
     goalId: c.req.param('goalId'),
-    amountCents: Number(f.get('montoPesos')) * 100,
+    amountCents,
     note: String(f.get('note') ?? ''),
   })
   return c.redirect(`/g/${c.req.param('goalId')}`)
