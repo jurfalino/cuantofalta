@@ -60,6 +60,7 @@ connectRoutes.get('/oauth/callback', async (c) => {
     clientSecret: c.env.MP_CLIENT_SECRET,
     code,
     redirectUri: `${c.env.PUBLIC_BASE_URL}/oauth/callback`,
+    testToken: c.env.MP_TEST_MODE === 'true',
   })
 
   const { rowsChanged } = await saveNgoTokens(db(c.env.DB), {

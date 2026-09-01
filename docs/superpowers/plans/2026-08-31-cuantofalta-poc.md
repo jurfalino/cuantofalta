@@ -1740,6 +1740,11 @@ npx wrangler secret put MP_CLIENT_ID
 npx wrangler secret put MP_CLIENT_SECRET
 npx wrangler secret put TOKEN_KEY      # output of generateKeyBase64()
 npx wrangler secret put PUBLIC_BASE_URL
+# MP_TEST_MODE (optional, omit in prod): set to the string 'true' to make
+# the OAuth code exchange pass test_token: true, required when connecting
+# against Mercado Pago test users (sandbox OAuth) rather than real seller
+# accounts — e.g. for the Task 9 end-to-end run.
+npx wrangler secret put MP_TEST_MODE
 ```
 
 - [ ] **Step 3: Apply migrations and deploy**

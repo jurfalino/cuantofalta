@@ -1,9 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
-  buildAuthorizeUrl, parseTokenResponse, signPayload, verifyPayload,
+  buildAuthorizeUrl, parseTokenResponse, signPayload, verifyPayload, exchangeCode,
   CONNECT_LINK_TTL_SECONDS, OAUTH_STATE_TTL_SECONDS,
 } from './oauth'
 import { generateKeyBase64 } from '../credentials/crypto'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('buildAuthorizeUrl', () => {
   it('includes client id, redirect uri and state', () => {
@@ -36,6 +40,38 @@ describe('parseTokenResponse', () => {
 
   it('throws when the payload has no refresh token', () => {
     expect(() => parseTokenResponse({ access_token: 'APP_USR-1', expires_in: 100, user_id: 1 })).toThrow()
+  })
+})
+
+describe('exchangeCode', () => {
+  function stubTokenResponse() {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({
+      access_token: 'APP_USR-1', refresh_token: 'TG-1', expires_in: 100, user_id: 1,
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  async function bodyOf(fetchMock: ReturnType<typeof stubTokenResponse>): Promise<Record<string, unknown>> {
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    return JSON.parse(init.body as string)
+  }
+
+  it('sends test_token: false by default', async () => {
+    const fetchMock = stubTokenResponse()
+    await exchangeCode({
+      clientId: 'cid', clientSecret: 'csecret', code: 'abc', redirectUri: 'https://app.test/oauth/callback',
+    })
+    expect((await bodyOf(fetchMock)).test_token).toBe(false)
+  })
+
+  it('sends test_token: true when explicitly requested (MP_TEST_MODE)', async () => {
+    const fetchMock = stubTokenResponse()
+    await exchangeCode({
+      clientId: 'cid', clientSecret: 'csecret', code: 'abc',
+      redirectUri: 'https://app.test/oauth/callback', testToken: true,
+    })
+    expect((await bodyOf(fetchMock)).test_token).toBe(true)
   })
 })
 

@@ -19,9 +19,11 @@ async function buildEnv(dbInstance: D1Database, tokenKey: string): Promise<Env> 
 }
 
 function stubTokenExchange() {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+  const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({
     access_token: 'APP_USR-1', refresh_token: 'TG-1', expires_in: 15552000, user_id: 123,
-  }), { status: 200, headers: { 'content-type': 'application/json' } })))
+  }), { status: 200, headers: { 'content-type': 'application/json' } }))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 afterEach(() => {
@@ -62,5 +64,22 @@ describe('GET /oauth/callback', () => {
 
     expect(res.status).toBe(200)
     expect(text).toContain('Cuenta conectada')
+  })
+
+  it('passes MP_TEST_MODE through to the token exchange as test_token', async () => {
+    const tokenKey = await generateKeyBase64()
+    const testDb = createTestD1()
+    await createNgo(db(testDb), { id: 'ngo-1', name: 'Refugio', slug: 'refugio' })
+    const env = { ...(await buildEnv(testDb, tokenKey)), MP_TEST_MODE: 'true' }
+    const state = await signPayload('oauth-state', 'ngo-1', tokenKey, new Date(), 600)
+    const fetchMock = stubTokenExchange()
+
+    const app = new Hono<{ Bindings: Env }>()
+    app.route('/', connectRoutes)
+    await app.request(`/oauth/callback?code=abc&state=${encodeURIComponent(state)}`, {}, env)
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    expect(body.test_token).toBe(true)
   })
 })
